@@ -31,8 +31,8 @@ There should be five fields in the file
 | GOOGLE_APPLICATION_CREDENTIALS       | private key generated from firebase console                  |
 
 Note: the range of the two google sheets defines where the program should read.\
-For event range, it should look something like, Sheet1!A<row to start reading>:K.\
-For mentor range, it should look something like, Sheet1!A<row to start reading>:G.
+For event range, it should look something like, Sheet1!A\<row to start reading\>:K.\
+For mentor range, it should look something like, Sheet1!A\<row to start reading\>:G.
 
 # Clone the repo to your local working directory.
 

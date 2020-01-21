@@ -75,7 +75,7 @@ def populate_users_mentor(values, db):
             # if the document doesn't exist, then populate it
             data = {
                 u'email': values[row][2],
-                u'mentorship': True,
+                u'mentorship': False,
                 u'name': values[row][1],
                 u'officer_signs': [],
                 u'induction_points': 0,
@@ -86,7 +86,7 @@ def populate_users_mentor(values, db):
             print(values[row][2], " is populated\n")
         elif i > 1:
             # This shouldn't happen, but just to check.
-            print('More than one document for one email\n')
+            print('More than one document for one email: ' + values[row][2] + '\n')
             return
         # else don't need to do anything
 
@@ -119,7 +119,7 @@ def populate_users_event(values, db):
             print(values[row][1], " is populated\n")
         elif i > 1:
             # This shouldn't happen, but just to check.
-            print('More than one document for one email\n')
+            print('More than one document for one email: ' + values[row][1] + '\n')
         # else don't need to do anything
 
 def update_event(values, db):
@@ -144,6 +144,7 @@ def update_event(values, db):
         else:
             # Now we can udate the events
             date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
+           
             data = {
                 u'created': date_time,
                 u'event_name': values[row][7],
@@ -152,23 +153,23 @@ def update_event(values, db):
                 u'user_id': doc_id,
                 u'value': float(values[row][8])
             }
+
             db.collection(u'pointReward').add(data)
+
             print("Finished updating events\n")
+
             if doc_id in user_dict:
                 user_dict[doc_id]['induction_points'] += float(values[row][8])
-                user_dict[doc_id]['officer_signs'].append(values[row][9])
-                if 'interview' in values[row][7].lower() or 'resume' in values[row][7].lower():
-                    user_dict[doc_id]['professional'] = True 
+                user_dict[doc_id]['officer_signs'].add(values[row][9])
             else:
-                user_dict[doc_id] = {'professional': False, 'induction_points': 1, 'officer_signs': [values[row][9]]}
-                if 'interview' in values[row][7].lower() or 'resume' in values[row][7].lower():
-                    user_dict[doc_id]['professional'] = True
+                user_dict[doc_id] = {'induction_points': float(values[row][8]), 'officer_signs': {values[row][9]}}
+            
+            if 'interview' in values[row][7].lower() or 'resume' in values[row][7].lower():
+                user_dict[doc_id]['professional'] = True
+        
     for key, value in user_dict.items():
-        doc_dict = db.collection(u'users').document(key).get().to_dict()
-        if value['professional'] is False:
-            value['professional'] = doc_dict['professional']
         value['induction_points'] = firestore.Increment(value['induction_points'])
-        value['officer_signs'] = firestore.ArrayUnion(list(set(value['officer_signs'])))
+        value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
         db.collection(u'users').document(key).update(value)
        
 
@@ -202,17 +203,22 @@ def update_mentor_event(values, db):
                 u'user_id': doc_id,
                 u'value': 1
             }
+
             db.collection(u'pointReward').add(data)
+            
             print("Finished updating mentor events\n")
+            
             if doc_id in user_dict:
                 user_dict[doc_id]['induction_points'] += 1
-                user_dict[doc_id]['officer_signs'].append(values[row][3])
+                user_dict[doc_id]['officer_signs'].add(values[row][3])
             else:
-                user_dict[doc_id] = {'induction_points': 1, 'officer_signs': [values[row][3]]}
-                
+                user_dict[doc_id] = {'induction_points': 1, 'officer_signs': {values[row][3]}}
+            
+            user_dict[doc_id]['mentorship'] = True
+    
     for key, value in user_dict.items():
         value['induction_points'] = firestore.Increment(value['induction_points'])
-        value['officer_signs'] = firestore.ArrayUnion(value['officer_signs'])
+        value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
         db.collection(u'users').document(key).update(value)
             
         
@@ -222,14 +228,20 @@ def main():
     # get all the values into a 2d array 
     values_mentor = get_sheet(service, mentor_sheet_id, mentor_range)
     values_event = get_sheet(service, event_sheet_id, event_range)
+
     # start firebase and get access to the databse
     firebase_admin.initialize_app()
     db = firestore.client()  
     
-    populate_users_mentor(values_mentor, db)
-    populate_users_event(values_event, db)
-    update_mentor_event(values_mentor, db)
-    update_event(values_event, db)
+    if(len(values_mentor) > 0):
+        populate_users_mentor(values_mentor, db)
+        update_mentor_event(values_mentor, db)
+    
+    
+    if(len(values_event) > 0):
+        populate_users_event(values_event, db)
+        update_event(values_event, db)
+    
 
     # This is the only crazy and stupid way I can think of to rewrite the env file
     # If you found any other way please use them.

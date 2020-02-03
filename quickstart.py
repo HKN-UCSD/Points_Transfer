@@ -90,6 +90,11 @@ def populate_users_mentor(values, db):
             return
         # else don't need to do anything
 
+
+
+## ISSUE: Sheet column aignment had been updated. Change scripts to reflect the same.
+## ISSUE: Find a way to verify emails in both columns before populating point.
+
 def populate_users_event(values, db):
     roles = db.collection(u'roles').where(u'value', u'==', u'Inductee').stream()
     role_id=None
@@ -129,6 +134,9 @@ def update_event(values, db):
         reward_id = doc.id
     user_dict = {}
     for row in range(len(values)):
+
+        ## ISSUE: Queries for user doc multiple times.
+
         docs = db.collection(u'users').where(u'email', u'==', values[row][1]).stream()
         # Use i to count how many documents are returned from the query
         i = 0
@@ -141,6 +149,10 @@ def update_event(values, db):
             # This shouldn't happen but just to check
             print(values[row][1] + "More or less than one doc is returned\n")
             return
+
+            ## ISSUE: Breaks on error AFTER populating some values.
+            ## ISSUE: Return row number so and exit so that next time the script runs from this row onwards
+
         else:
             # Now we can udate the events
             date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
@@ -180,6 +192,9 @@ def update_mentor_event(values, db):
         reward_id = doc.id
     user_dict = {}
     for row in range(len(values)):
+
+        ## ISSUE: Queries for user doc multiple times.
+
         docs = db.collection(u'users').where(u'email', u'==', values[row][2]).stream()
         # Use i to count how many documents are returned from the query
         i = 0
@@ -192,6 +207,10 @@ def update_mentor_event(values, db):
             # This shouldn't happen but just to check
             print(values[row][2] + "More or less than one doc is returned\n")
             return
+
+            ## ISSUE: Breaks on error AFTER populating some values.
+            ## ISSUE: Return row number so and exit so that next time the script runs from this row onwards
+
         else:
             # Now we can udate the events
             date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
@@ -233,6 +252,8 @@ def main():
     firebase_admin.initialize_app()
     db = firestore.client()  
     
+
+    ## ISSUE: Change update_** method calls to store retunred row value and write that down in the config file.
     if(len(values_mentor) > 0):
         populate_users_mentor(values_mentor, db)
         update_mentor_event(values_mentor, db)
@@ -250,6 +271,8 @@ def main():
     starting_index = starting_index.replace(':K', '')
     starting_index_mentor = mentor_range.replace('Sheet1!A','')
     starting_index_mentor = starting_index_mentor.replace(':G', '')
+
+    ## ISSUE: Update range value that gets written down to config file.
     lines = ['EVENT_SHEET_ID="'+event_sheet_id+'"\n', 'MENTOR_SHEET_ID="'+mentor_sheet_id+'"\n',
             'GOOGLE_APPLICATION_CREDENTIALS="'+cred+'"\n', 
             'EVENT_RANGE="Sheet1!A'+str(len(values_event)+int(starting_index))+':K"\n', 

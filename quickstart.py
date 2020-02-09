@@ -23,6 +23,10 @@ event_sheet_id = os.getenv('EVENT_SHEET_ID')
 event_range = os.getenv('EVENT_RANGE')
 mentor_range = os.getenv('MENTOR_RANGE')
 
+# Starting row number
+event_start = int(event_range.replace('Sheet1!A','').replace(':L', ''))
+mentor_start = int(mentor_range.replace('Sheet1!A', '').replace(':I', ''))
+
 # cred
 cred = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 
@@ -58,23 +62,42 @@ def get_sheet(service, sheet_id, sheet_range):
     return result.get('values', [])
 
 def populate_users_mentor(values, db):
+    error = False
     roles = db.collection(u'roles').where(u'value', u'==', u'Inductee').stream()
     role_id=None
+
+    num_docs = 0
+
     for doc in roles:
         role_id = doc.id
+        num_docs += 1
+    
+    if(num_docs != 1):
+        print("Multiple documents for enum Inductee")
+        return True
+
     for row in range(len(values)):
         # Look at the third, row[2], element of the row, which is the mentee's email 
         # and query for that user
-        docs = db.collection(u'users').where(u'email', u'==', values[row][2]).stream()
+
+        if values[row][2].lower() != values[row][3].lower() and (len(values[row][3].lower()) != 0):
+            print("Mismatched emails in mentor form at row: " + str(mentor_start + row))
+            # print("Mismatched emails in mentor form at row: {}".format(mentor_start + row))
+            error = True
+            continue
+
+        user_email = values[row][2].lower().strip()
+
+        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
         # Use i to count how many documents are returned from the query
         i = 0
         for doc in docs:
             i += 1
         if i is 0:
-            print(values[row][2], " is not in the database\n")
+            print(user_email, " is not in the database\n")
             # if the document doesn't exist, then populate it
             data = {
-                u'email': values[row][2],
+                u'email': user_email,
                 u'mentorship': False,
                 u'name': values[row][1],
                 u'officer_signs': [],
@@ -83,12 +106,14 @@ def populate_users_mentor(values, db):
                 u'role_id': role_id
             }
             db.collection(u'users').add(data)
-            print(values[row][2], " is populated\n")
+            print(user_email, " is populated\n")
         elif i > 1:
             # This shouldn't happen, but just to check.
             print('More than one document for one email: ' + values[row][2] + '\n')
-            return
+            error = True
         # else don't need to do anything
+
+    return error
 
 
 
@@ -96,36 +121,57 @@ def populate_users_mentor(values, db):
 ## ISSUE: Find a way to verify emails in both columns before populating point.
 
 def populate_users_event(values, db):
+    error = False
     roles = db.collection(u'roles').where(u'value', u'==', u'Inductee').stream()
     role_id=None
+
+    num_docs = 0
+
     for doc in roles:
         role_id = doc.id
+        num_docs += 1
+    
+    if(num_docs != 1):
+        print("Multiple documents for enum Inductee")
+        return True
+
     for row in range(len(values)):
+
+        if (values[row][1].lower() != values[row][2].lower()) and (len(values[row][2].lower()) != 0):
+            print("Mismatched emails in event form at row: {}".format(event_start + row))
+            error = True
+            continue
+
+        user_email = values[row][1].lower().strip()
+
         # Look at the third, row[2], element of the row, which is the mentee's email 
         # and query for that user
-        docs = db.collection(u'users').where(u'email', u'==', values[row][1]).stream()
+        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
         # Use i to count how many documents are returned from the query
         i = 0
         for doc in docs:
             i += 1
         if i is 0:
-            print(values[row][1], " is not in the database\n")
+            print(user_email, " is not in the database\n")
             # if the document doesn't exist, then populate it
             data = {
-                u'email': values[row][1],
+                u'email': user_email,
                 u'mentorship': False,
-                u'name': values[row][2],
+                u'name': values[row][3],
                 u'officer_signs': [],
                 u'induction_points': 0,
                 u'professional': False,
                 u'role_id': role_id
             }
             db.collection(u'users').add(data)
-            print(values[row][1], " is populated\n")
+            print(user_email, " is populated\n")
         elif i > 1:
             # This shouldn't happen, but just to check.
             print('More than one document for one email: ' + values[row][1] + '\n')
+            error = True
         # else don't need to do anything
+    
+    return error
 
 def update_event(values, db):
     point_reward_type = db.collection(u'pointRewardType').where(u'value', u'==', u'Induction Point').stream()
@@ -135,9 +181,15 @@ def update_event(values, db):
     user_dict = {}
     for row in range(len(values)):
 
+        if (values[row][1].lower() != values[row][2].lower()) and (len(values[row][2].lower()) != 0):
+            print("Mismatched emails in event form at row: {}".format(event_start + row))
+            return row
+
         ## ISSUE: Queries for user doc multiple times.
 
-        docs = db.collection(u'users').where(u'email', u'==', values[row][1]).stream()
+        user_email = values[row][1].lower().strip()
+
+        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
         # Use i to count how many documents are returned from the query
         i = 0
         doc_id = None
@@ -147,8 +199,8 @@ def update_event(values, db):
 
         if i is not 1:
             # This shouldn't happen but just to check
-            print(values[row][1] + "More or less than one doc is returned\n")
-            return
+            print(user_email + ": More or less than one doc is returned\n")
+            return row
 
             ## ISSUE: Breaks on error AFTER populating some values.
             ## ISSUE: Return row number so and exit so that next time the script runs from this row onwards
@@ -159,11 +211,11 @@ def update_event(values, db):
            
             data = {
                 u'created': date_time,
-                u'event_name': values[row][7],
-                u'officer_name': values[row][9],
+                u'event_name': values[row][8],
+                u'officer_name': values[row][10],
                 u'pointrewardtype_id': reward_id,
                 u'user_id': doc_id,
-                u'value': float(values[row][8])
+                u'value': float(values[row][9])
             }
 
             db.collection(u'pointReward').add(data)
@@ -171,18 +223,20 @@ def update_event(values, db):
             print("Finished updating events\n")
 
             if doc_id in user_dict:
-                user_dict[doc_id]['induction_points'] += float(values[row][8])
-                user_dict[doc_id]['officer_signs'].add(values[row][9])
+                user_dict[doc_id]['induction_points'] += float(values[row][9])
+                user_dict[doc_id]['officer_signs'].add(values[row][10])
             else:
-                user_dict[doc_id] = {'induction_points': float(values[row][8]), 'officer_signs': {values[row][9]}}
+                user_dict[doc_id] = {'induction_points': float(values[row][9]), 'officer_signs': {values[row][10]}}
             
-            if 'interview' in values[row][7].lower() or 'resume' in values[row][7].lower():
+            if 'interview' in values[row][8].lower() or 'resume' in values[row][8].lower():
                 user_dict[doc_id]['professional'] = True
         
     for key, value in user_dict.items():
         value['induction_points'] = firestore.Increment(value['induction_points'])
         value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
         db.collection(u'users').document(key).update(value)
+    
+    return len(values)
        
 
 def update_mentor_event(values, db):
@@ -191,11 +245,18 @@ def update_mentor_event(values, db):
     for doc in point_reward_type:
         reward_id = doc.id
     user_dict = {}
+    
     for row in range(len(values)):
+
+        if values[row][2].lower() != values[row][3].lower() and (len(values[row][3].lower()) != 0):
+            print("Mismatched emails in mentor form at row: {}".format(mentor_start + row))
+            return row
+        
+        user_email = values[row][2].lower().strip()
 
         ## ISSUE: Queries for user doc multiple times.
 
-        docs = db.collection(u'users').where(u'email', u'==', values[row][2]).stream()
+        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
         # Use i to count how many documents are returned from the query
         i = 0
         doc_id = None
@@ -205,8 +266,8 @@ def update_mentor_event(values, db):
 
         if i is not 1:
             # This shouldn't happen but just to check
-            print(values[row][2] + "More or less than one doc is returned\n")
-            return
+            print(user_email + ": More or less than one doc is returned\n")
+            return row
 
             ## ISSUE: Breaks on error AFTER populating some values.
             ## ISSUE: Return row number so and exit so that next time the script runs from this row onwards
@@ -217,7 +278,7 @@ def update_mentor_event(values, db):
             data = {
                 u'created': date_time,
                 u'event_name': u'Mentor 1:1',
-                u'officer_name': values[row][3],
+                u'officer_name': values[row][4],
                 u'pointrewardtype_id': reward_id,
                 u'user_id': doc_id,
                 u'value': 1
@@ -229,9 +290,9 @@ def update_mentor_event(values, db):
             
             if doc_id in user_dict:
                 user_dict[doc_id]['induction_points'] += 1
-                user_dict[doc_id]['officer_signs'].add(values[row][3])
+                user_dict[doc_id]['officer_signs'].add(values[row][4])
             else:
-                user_dict[doc_id] = {'induction_points': 1, 'officer_signs': {values[row][3]}}
+                user_dict[doc_id] = {'induction_points': 1, 'officer_signs': {values[row][4]}}
             
             user_dict[doc_id]['mentorship'] = True
     
@@ -239,6 +300,8 @@ def update_mentor_event(values, db):
         value['induction_points'] = firestore.Increment(value['induction_points'])
         value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
         db.collection(u'users').document(key).update(value)
+
+    return len(values)
             
         
 def main():
@@ -252,16 +315,20 @@ def main():
     firebase_admin.initialize_app()
     db = firestore.client()  
     
+    print(event_start)
+    print(mentor_start)
+
+    processed_mentor_pts = 0
+    processed_events_pts = 0
 
     ## ISSUE: Change update_** method calls to store retunred row value and write that down in the config file.
-    if(len(values_mentor) > 0):
-        populate_users_mentor(values_mentor, db)
-        update_mentor_event(values_mentor, db)
+
+    if(len(values_mentor) > 0 and not populate_users_mentor(values_mentor, db)):
+        processed_mentor_pts = update_mentor_event(values_mentor, db)
     
     
-    if(len(values_event) > 0):
-        populate_users_event(values_event, db)
-        update_event(values_event, db)
+    if(len(values_event) > 0 and not populate_users_event(values_event, db)):
+        processed_events_pts = update_event(values_event, db)
     
 
     # This is the only crazy and stupid way I can think of to rewrite the env file
@@ -275,8 +342,8 @@ def main():
     ## ISSUE: Update range value that gets written down to config file.
     lines = ['EVENT_SHEET_ID="'+event_sheet_id+'"\n', 'MENTOR_SHEET_ID="'+mentor_sheet_id+'"\n',
             'GOOGLE_APPLICATION_CREDENTIALS="'+cred+'"\n', 
-            'EVENT_RANGE="Sheet1!A'+str(len(values_event)+int(starting_index))+':K"\n', 
-            'MENTOR_RANGE="Sheet1!A'+str(len(values_mentor)+int(starting_index_mentor))+':G"\n']
+            'EVENT_RANGE="Sheet1!A'+str(processed_events_pts+int(event_start))+':L"\n', 
+            'MENTOR_RANGE="Sheet1!A'+str(processed_mentor_pts+int(mentor_start))+':I"\n']
     with open('config.env', 'w') as f:
         f.writelines(lines)
 

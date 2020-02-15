@@ -9,6 +9,7 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 from dotenv import load_dotenv
+import sys
 
 
 # If modifying these scopes, delete the file token.pickle.
@@ -26,6 +27,14 @@ mentor_range = os.getenv('MENTOR_RANGE')
 # Starting row number
 event_start = int(event_range.replace('Sheet1!A','').replace(':L', ''))
 mentor_start = int(mentor_range.replace('Sheet1!A', '').replace(':I', ''))
+
+DRY_RUN = 0
+MODIFY = 1
+mode = DRY_RUN
+
+users_docID = {}
+users_data = {}
+roles = {}
 
 # cred
 cred = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
@@ -61,6 +70,77 @@ def get_sheet(service, sheet_id, sheet_range):
     result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_range).execute()
     return result.get('values', [])
 
+def populate_users(sheetName, values, startRow, nameCol, emailCol, confirmEmailCol, db):
+    error = False
+    roles = db.collection(u'roles').where(u'value', u'==', u'Inductee').stream()
+    role_id=None
+
+    num_docs = 0
+
+    for doc in roles:
+        role_id = doc.id
+        num_docs += 1
+    
+    if(num_docs != 1):
+        print("Multiple documents for enum Inductee")
+        return True
+
+    for row in range(len(values)):
+        # Look at the third, row[2], element of the row, which is the mentee's email 
+        # and query for that user
+
+        if values[row][emailCol].lower() != values[row][confirmEmailCol].lower() and (len(values[row][confirmEmailCol].lower()) != 0):
+            print("Mismatched emails in " + sheetName + " form at row: " + str(startRow + row))
+            error = True
+            continue
+
+        user_email = values[row][emailCol].lower().strip()
+
+        if user_email in users_docID:
+            print("User known to exist")
+            continue
+
+        userDocID = None
+
+        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
+        # Use i to count how many documents are returned from the query
+        i = 0
+        for doc in docs:
+            i += 1
+            userDocID = doc.id
+        if i is 0:
+            print(user_email, " is not in the database\n")
+            # if the document doesn't exist, then populate it
+            data = {
+                u'email': user_email,
+                u'mentorship': False,
+                u'name': values[row][nameCol],
+                u'officer_signs': [],
+                u'induction_points': 0,
+                u'professional': False,
+                u'role_id': role_id
+            }
+
+            if mode == MODIFY:
+                userDocID = db.collection(u'users').add(data)[1].id
+            elif mode == DRY_RUN:
+                print("Creating user document in the database for email " + user_email)
+            
+            print(user_email, " is populated\n")
+        elif i > 1:
+            # This shouldn't happen, but just to check.
+            userDocID = None
+            print('More than one document for one email: ' + values[row][emailCol] + '\n')
+            error = True
+        # else don't need to do anything
+        
+        if userDocID != None:
+            print("Added email to global list of emails")
+            users_docID[user_email] = userDocID
+
+    return error
+
+# Method replaced by populate_users
 def populate_users_mentor(values, db):
     error = False
     roles = db.collection(u'roles').where(u'value', u'==', u'Inductee').stream()
@@ -88,11 +168,18 @@ def populate_users_mentor(values, db):
 
         user_email = values[row][2].lower().strip()
 
+        if user_email in users_docID:
+            print("User known to exist")
+            continue
+
+        userDocID = None
+
         docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
         # Use i to count how many documents are returned from the query
         i = 0
         for doc in docs:
             i += 1
+            userDocID = doc.id
         if i is 0:
             print(user_email, " is not in the database\n")
             # if the document doesn't exist, then populate it
@@ -105,21 +192,30 @@ def populate_users_mentor(values, db):
                 u'professional': False,
                 u'role_id': role_id
             }
-            db.collection(u'users').add(data)
+
+            if mode == MODIFY:
+                userDocID = db.collection(u'users').add(data)[1].id
+            elif mode == DRY_RUN:
+                print("Creating user document in the database for email " + user_email)
+            
             print(user_email, " is populated\n")
         elif i > 1:
             # This shouldn't happen, but just to check.
+            userDocID = None
             print('More than one document for one email: ' + values[row][2] + '\n')
             error = True
         # else don't need to do anything
+        
+        if userDocID != None:
+            print("Added email to global list of emails")
+            users_docID[user_email] = userDocID
 
     return error
-
-
 
 ## ISSUE: Sheet column aignment had been updated. Change scripts to reflect the same.
 ## ISSUE: Find a way to verify emails in both columns before populating point.
 
+# Method replaced by populate_users
 def populate_users_event(values, db):
     error = False
     roles = db.collection(u'roles').where(u'value', u'==', u'Inductee').stream()
@@ -144,6 +240,12 @@ def populate_users_event(values, db):
 
         user_email = values[row][1].lower().strip()
 
+        if user_email in users_docID:
+            print("User known to exist")
+            continue
+
+        userDocID = None
+
         # Look at the third, row[2], element of the row, which is the mentee's email 
         # and query for that user
         docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
@@ -151,6 +253,7 @@ def populate_users_event(values, db):
         i = 0
         for doc in docs:
             i += 1
+            userDocID = doc.id
         if i is 0:
             print(user_email, " is not in the database\n")
             # if the document doesn't exist, then populate it
@@ -163,22 +266,34 @@ def populate_users_event(values, db):
                 u'professional': False,
                 u'role_id': role_id
             }
-            db.collection(u'users').add(data)
+
+            if mode == MODIFY:
+                userDocID = db.collection(u'users').add(data)[1].id
+            elif mode == DRY_RUN:
+                print("Creating user document in the database for email " + user_email)
+
             print(user_email, " is populated\n")
         elif i > 1:
             # This shouldn't happen, but just to check.
+            userDocID = None
             print('More than one document for one email: ' + values[row][1] + '\n')
             error = True
         # else don't need to do anything
+
+        if userDocID != None:
+            print("Added email to global list of emails")
+            users_docID[user_email] = userDocID
     
     return error
 
 def update_event(values, db):
     point_reward_type = db.collection(u'pointRewardType').where(u'value', u'==', u'Induction Point').stream()
+    
     reward_id=None
+    
     for doc in point_reward_type:
         reward_id = doc.id
-    user_dict = {}
+    
     for row in range(len(values)):
 
         if (values[row][1].lower() != values[row][2].lower()) and (len(values[row][2].lower()) != 0):
@@ -189,62 +304,50 @@ def update_event(values, db):
 
         user_email = values[row][1].lower().strip()
 
-        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
-        # Use i to count how many documents are returned from the query
-        i = 0
-        doc_id = None
-        for doc in docs:
-            i += 1
-            doc_id = doc.id
+        userDocID = users_docID.get(user_email, None)
 
-        if i is not 1:
-            # This shouldn't happen but just to check
-            print(user_email + ": More or less than one doc is returned\n")
-            return row
-
-            ## ISSUE: Breaks on error AFTER populating some values.
-            ## ISSUE: Return row number so and exit so that next time the script runs from this row onwards
-
-        else:
-            # Now we can udate the events
-            date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
-           
-            data = {
-                u'created': date_time,
-                u'event_name': values[row][8],
-                u'officer_name': values[row][10],
-                u'pointrewardtype_id': reward_id,
-                u'user_id': doc_id,
-                u'value': float(values[row][9])
-            }
-
-            db.collection(u'pointReward').add(data)
-
-            print("Finished updating events\n")
-
-            if doc_id in user_dict:
-                user_dict[doc_id]['induction_points'] += float(values[row][9])
-                user_dict[doc_id]['officer_signs'].add(values[row][10])
-            else:
-                user_dict[doc_id] = {'induction_points': float(values[row][9]), 'officer_signs': {values[row][10]}}
-            
-            if 'interview' in values[row][8].lower() or 'resume' in values[row][8].lower():
-                user_dict[doc_id]['professional'] = True
+        if userDocID == None:
+            print("User document for user with email " + user_email + " does not exist.")
+            continue
         
-    for key, value in user_dict.items():
-        value['induction_points'] = firestore.Increment(value['induction_points'])
-        value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
-        db.collection(u'users').document(key).update(value)
+        # Now we can udate the events
+        date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
+        
+        data = {
+            u'created': date_time,
+            u'event_name': values[row][8],
+            u'officer_name': values[row][10],
+            u'pointrewardtype_id': reward_id,
+            u'user_id': userDocID,
+            u'value': float(values[row][9])
+        }
+
+        if mode == MODIFY:
+            db.collection(u'pointReward').add(data)
+        elif mode == DRY_RUN:
+            print("\nAdding the following point to the database:")
+            print(data)
+
+        print("Finished updating events\n")
+
+        if userDocID in users_data:
+            users_data[userDocID]['induction_points'] += float(values[row][9])
+            users_data[userDocID]['officer_signs'].add(values[row][10])
+        else:
+            users_data[userDocID] = {'induction_points': float(values[row][9]), 'officer_signs': {values[row][10]}}
+        
+        if 'interview' in values[row][8].lower() or 'resume' in values[row][8].lower():
+            users_data[userDocID]['professional'] = True
     
     return len(values)
-       
 
 def update_mentor_event(values, db):
     point_reward_type = db.collection(u'pointRewardType').where(u'value', u'==', u'Induction Point').stream()
+    
     reward_id = None
+    
     for doc in point_reward_type:
         reward_id = doc.id
-    user_dict = {}
     
     for row in range(len(values)):
 
@@ -254,57 +357,77 @@ def update_mentor_event(values, db):
         
         user_email = values[row][2].lower().strip()
 
-        ## ISSUE: Queries for user doc multiple times.
+        ## ISSUE: Queries for user doc multiple times
 
-        docs = db.collection(u'users').where(u'email', u'==', user_email).stream()
-        # Use i to count how many documents are returned from the query
-        i = 0
-        doc_id = None
-        for doc in docs:
-            i += 1
-            doc_id = doc.id
+        userDocID = users_docID.get(user_email, None)
 
-        if i is not 1:
-            # This shouldn't happen but just to check
-            print(user_email + ": More or less than one doc is returned\n")
-            return row
+        if userDocID == None:
+            print("User document for user with email " + user_email + " does not exist.")
+            continue
+        
+        date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
+        data = {
+            u'created': date_time,
+            u'event_name': u'Mentor 1:1',
+            u'officer_name': values[row][4],
+            u'pointrewardtype_id': reward_id,
+            u'user_id': userDocID,
+            u'value': 1
+        }
 
-            ## ISSUE: Breaks on error AFTER populating some values.
-            ## ISSUE: Return row number so and exit so that next time the script runs from this row onwards
-
-        else:
-            # Now we can udate the events
-            date_time = datetime.datetime.strptime(values[row][0], "%m/%d/%Y %H:%M:%S")
-            data = {
-                u'created': date_time,
-                u'event_name': u'Mentor 1:1',
-                u'officer_name': values[row][4],
-                u'pointrewardtype_id': reward_id,
-                u'user_id': doc_id,
-                u'value': 1
-            }
-
+        if mode == MODIFY:
             db.collection(u'pointReward').add(data)
-            
-            print("Finished updating mentor events\n")
-            
-            if doc_id in user_dict:
-                user_dict[doc_id]['induction_points'] += 1
-                user_dict[doc_id]['officer_signs'].add(values[row][4])
-            else:
-                user_dict[doc_id] = {'induction_points': 1, 'officer_signs': {values[row][4]}}
-            
-            user_dict[doc_id]['mentorship'] = True
-    
-    for key, value in user_dict.items():
-        value['induction_points'] = firestore.Increment(value['induction_points'])
-        value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
-        db.collection(u'users').document(key).update(value)
+        elif mode == DRY_RUN:
+            print("\nAdding the following point to the database:")
+            print(data)
+        
+        print("Finished updating mentor events\n")
+        
+        if userDocID in users_data:
+            users_data[userDocID]['induction_points'] += 1
+            users_data[userDocID]['officer_signs'].add(values[row][4])
+        else:
+            users_data[userDocID] = {'induction_points': 1, 'officer_signs': {values[row][4]}}
+        
+        users_data[userDocID]['mentorship'] = True
 
     return len(values)
-            
-        
+
+def getEnumMap(collectionName, db):
+    roles = {}
+    rolesDocs = db.collection(collectionName).stream()
+
+    for doc in rolesDocs:
+        roles[doc.get('value')] = doc.id
+    
+    return roles
+
 def main():
+
+    global mode
+    global users_docID
+    global users_data
+    global roles
+
+    print("Mode before processing input")
+    print(mode)
+
+    if(len(sys.argv) != 2):
+        print("Please use -D to indicate a dry-run of the program and -M for the actual run which will modify the database.")
+        return
+    elif (sys.argv[1] == "-D"):
+        print("Executing program in dry-run mode. Database will not be modified.")
+        mode = DRY_RUN
+    elif (sys.argv[1] == "-M"):
+        print("Executing program in modify mode. Database will be modified.")
+        mode = MODIFY
+    else:
+        print("Please use -D to indicate a dry-run of the program and -M for the actual run which will modify the database.")
+        return
+
+    print("Mode after processing input")
+    print(mode)
+    # return
     # get the google sheet service
     service = get_service()
     # get all the values into a 2d array 
@@ -315,6 +438,10 @@ def main():
     firebase_admin.initialize_app()
     db = firestore.client()  
     
+    roles = getEnumMap("roles", db)
+
+    print(roles)
+    return
     print(event_start)
     print(mentor_start)
 
@@ -323,13 +450,28 @@ def main():
 
     ## ISSUE: Change update_** method calls to store retunred row value and write that down in the config file.
 
-    if(len(values_mentor) > 0 and not populate_users_mentor(values_mentor, db)):
+    print("\n\nWORKING WITH MENTOR POINTS SHEET\n\n")
+    # if(len(values_mentor) > 0 and not populate_users_mentor(values_mentor, db)):
+    if(len(values_mentor) > 0 and not populate_users("mentor", values_mentor, mentor_start, 1, 2, 3, db) and not populate_users("mentor", values_mentor, mentor_start, 4, 5, 6, db)):
+        print("\n\nPROCESSING MENTOR POINTS SHEET\n\n")
         processed_mentor_pts = update_mentor_event(values_mentor, db)
     
     
-    if(len(values_event) > 0 and not populate_users_event(values_event, db)):
+    print("\n\nWORKING WITH EVENT POINTS SHEET\n\n")
+    # if(len(values_event) > 0 and not populate_users_event(values_event, db)):
+    if(len(values_event) > 0 and not populate_users("event", values_event, event_start, 3, 1, 2, db)):
+        print("\n\nPROCESSING EVENT POINTS SHEET\n\n")
         processed_events_pts = update_event(values_event, db)
     
+
+    for key, value in users_data.items():
+        value['induction_points'] = firestore.Increment(value['induction_points'])
+        value['officer_signs'] = firestore.ArrayUnion(list(value['officer_signs']))
+        if mode == MODIFY:
+            db.collection(u'users').document(key).update(value)
+        elif mode == DRY_RUN:
+            print("\nUpdating document with id " + key + " with following data:")
+            print(value)
 
     # This is the only crazy and stupid way I can think of to rewrite the env file
     # If you found any other way please use them.
